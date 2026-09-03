@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TripCrew</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+    <div class="page-bg">
+        <div class="gradient-circle circle-1"></div>
+        <div class="gradient-circle circle-2"></div>
+        <div class="gradient-circle circle-3"></div>
+    </div>
+
+    <main class="app-container">
+
+        <!-- Auth bar -->
+        <div class="auth-bar">
+            <div class="auth-bar-logo">🧳 TripCrew</div>
+
+            <div id="authLoggedOut" class="auth-bar-actions">
+                <button class="auth-link-btn" onclick="openAuthModal('login')">Sign In</button>
+                <button class="auth-primary-btn" onclick="openAuthModal('register')">Sign Up</button>
+            </div>
+
+            <div id="authLoggedIn" class="auth-bar-actions hidden">
+                <button class="auth-link-btn" onclick="toggleTripsPanel()">
+                    My Trips
+                </button>
+                <div class="user-chip">
+                    <span id="userNameLabel">-</span>
+                </div>
+                <button class="auth-link-btn" onclick="logout()">Log Out</button>
+            </div>
+        </div>
+
+        <!-- Trips panel (shown when logged in and toggled) -->
+        <section id="tripsPanel" class="trips-panel hidden">
+            <div class="trips-panel-header">
+                <h3>My Trips</h3>
+                <button class="close-btn" onclick="toggleTripsPanel()">&times;</button>
+            </div>
+            <div id="tripsList" class="trips-list">
+                <p class="trips-empty">No saved trips yet. Generate a plan while signed in to save it here.</p>
+            </div>
+        </section>
+
+        <section class="hero-section">
+            <div class="badge">
+                🧳 TripCrew — A Multi-Agent Travel Planner with LangGraph
+            </div>
+
+            <h1>
+                Plan Your Perfect Trip with AI
+            </h1>
+
+            <p>
+                Search flights, discover hotels, and generate a complete travel itinerary using a crew of AI agents working together.
+            </p>
+        </section>
+
+        <section class="planner-card">
+
+            <div class="card-header">
+                <div>
+                    <h2>Where do you want to go?</h2>
+                    <p>
+                        Example: Plan a complete 7 days Japan trip from Bangladesh under 2 lakhs. Or tap the mic and just say it.
+                    </p>
+                </div>
+
+                <div class="status-pill">
+                    <span class="status-dot"></span>
+                    Online
+                </div>
+            </div>
+
+            <div class="input-area">
+                <div class="textarea-wrap">
+                    <textarea
+                        id="userInput"
+                        placeholder="Plan a complete 7 days Japan trip including flights, hotels and sightseeing under 2 lakhs..."
+                    ></textarea>
+
+                    <button id="micBtn" class="mic-btn" onclick="toggleRecording()" title="Speak your request">
+                        <svg id="micIcon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="23"></line>
+                            <line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                        <span id="micStatus" class="mic-status hidden">Listening...</span>
+                    </button>
+                </div>
+
+                <button id="sendBtn" onclick="sendMessage()">
+                    <span id="btnText">Generate Plan</span>
+                    <span id="btnLoader" class="loader hidden"></span>
+                </button>
+            </div>
+
+            <div class="quick-prompts">
+                <button onclick="setPrompt('Plan a complete 7 days Japan trip from Bangladesh including flights, hotels and sightseeing under 2 lakhs.')">
+                    Japan Trip
+                </button>
+
+                <button onclick="setPrompt('Plan a 5 days Dubai trip from Dhaka with flights, hotels and sightseeing.')">
+                    Dubai Trip
+                </button>
+
+                <button onclick="setPrompt('Plan a 7 days Thailand trip from Bangladesh with budget hotels and sightseeing.')">
+                    Thailand Trip
+                </button>
+
+                <button onclick="setPrompt('Give me all country flight info.')">
+                    Global Flights
+                </button>
+            </div>
+
+        </section>
+
+        <section id="resultSection" class="result-section hidden">
+
+            <div class="result-header">
+                <div>
+                    <h2>Your AI Travel Plan</h2>
+                    <p id="threadInfo">Thread ID: -</p>
+                </div>
+
+                <div class="result-actions">
+                    <button class="copy-btn" onclick="copyResult()">
+                        Copy
+                    </button>
+
+                    <button class="download-btn" onclick="downloadPDF()">
+                        Download PDF
+                    </button>
+                </div>
+            </div>
+
+            <div id="pdfContent" class="pdf-content">
+                <h1 class="pdf-title">AI Travel Plan</h1>
+                <div id="resultBox" class="result-box"></div>
+            </div>
+
+        </section>
+
+        <section id="errorBox" class="error-box hidden"></section>
+
+    </main>
+
+    <!-- Auth modal -->
+    <div id="authModal" class="modal-overlay hidden" onclick="closeAuthModalOnOverlay(event)">
+        <div class="modal-box">
+            <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+
+            <div class="modal-tabs">
+                <button id="tabLogin" class="modal-tab active" onclick="switchAuthTab('login')">Sign In</button>
+                <button id="tabRegister" class="modal-tab" onclick="switchAuthTab('register')">Sign Up</button>
+            </div>
+
+            <!-- Login form -->
+            <form id="loginForm" class="modal-form" onsubmit="return handleLogin(event)">
+                <label>Email</label>
+                <input type="email" id="loginEmail" required placeholder="you@example.com">
+
+                <label>Password</label>
+                <input type="password" id="loginPassword" required placeholder="••••••••">
+
+                <button type="submit" class="modal-submit-btn">Sign In</button>
+            </form>
+
+            <!-- Register form -->
+            <form id="registerForm" class="modal-form hidden" onsubmit="return handleRegister(event)">
+                <label>Name</label>
+                <input type="text" id="registerName" required placeholder="Your name">
+
+                <label>Email</label>
+                <input type="email" id="registerEmail" required placeholder="you@example.com">
+
+                <label>Password</label>
+                <input type="password" id="registerPassword" required placeholder="At least 6 characters" minlength="6">
+
+                <button type="submit" class="modal-submit-btn">Create Account</button>
+            </form>
+
+            <p id="authModalError" class="modal-error hidden"></p>
+
+            <p class="modal-note">Signing in is optional — you can plan trips as a guest too. Sign in to save your trip history.</p>
+        </div>
+    </div>
+
+    <footer>
+        Built with FastAPI, LangGraph, Groq, PostgreSQL, Tavily and AviationStack
+    </footer>
+
+    <!-- Markdown Renderer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- PDF Download Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Your Custom JS -->
+    <script src="/static/auth.js"></script>
+    <script src="/static/voice.js"></script>
+    <script src="/static/script.js"></script>
+
+</body>
+</html>
