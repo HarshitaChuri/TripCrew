@@ -207,14 +207,45 @@ async function loadTrips() {
         }
 
         tripsList.innerHTML = data.trips.map(trip => `
-            <button class="trip-item" onclick="openTrip('${trip.thread_id}')">
-                <span class="trip-title">${escapeHtml(trip.title || "Untitled trip")}</span>
-                <span class="trip-date">${new Date(trip.created_at).toLocaleDateString()}</span>
-            </button>
+            <div class="trip-item">
+                <button class="trip-open-btn" onclick="openTrip('${trip.thread_id}')">
+                    <span class="trip-title">${escapeHtml(trip.title || "Untitled trip")}</span>
+                    <span class="trip-date">${new Date(trip.created_at).toLocaleDateString()}</span>
+                </button>
+                <button class="trip-delete-btn" onclick="deleteTrip('${trip.id}', event)" title="Delete this trip">
+                    &times;
+                </button>
+            </div>
         `).join("");
 
     } catch (error) {
         // Silently ignore — trips panel just stays empty/stale.
+    }
+}
+
+async function deleteTrip(tripId, event) {
+    event.stopPropagation();
+
+    if (!confirm("Delete this trip? This can't be undone.")) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/trips/${tripId}`, {
+            method: "DELETE",
+            headers: getAuthHeaders()
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || "Could not delete trip.");
+        }
+
+        loadTrips();
+
+    } catch (error) {
+        showError(error.message);
     }
 }
 

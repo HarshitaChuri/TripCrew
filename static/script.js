@@ -1,5 +1,95 @@
 let currentThreadId = localStorage.getItem("travel_thread_id") || null;
 let latestAnswerMarkdown = "";
+let currentAbortController = null;
+let isGenerating = false;
+let speechUtterance = null;
+let isSpeaking = false;
+
+function toggleSpeech() {
+    const speakBtn = document.querySelector(".speak-btn");
+
+    if (isSpeaking) {
+        window.speechSynthesis.cancel();
+        isSpeaking = false;
+        speakBtn.textContent = "🔊 Listen";
+        return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+        showError("Text-to-speech isn't supported in this browser. Try Chrome or Edge.");
+        return;
+    }
+
+    const resultBox = document.getElementById("resultBox");
+    const text = resultBox.innerText.trim();
+
+    if (!text) {
+        showError("No travel plan available to read aloud.");
+        return;
+    }
+
+    speechUtterance = new SpeechSynthesisUtterance(text);
+    speechUtterance.rate = 1;
+    speechUtterance.pitch = 1;
+
+    speechUtterance.onend = () => {
+        isSpeaking = false;
+        speakBtn.textContent = "🔊 Listen";
+    };
+
+    speechUtterance.onerror = () => {
+        isSpeaking = false;
+        speakBtn.textContent = "🔊 Listen";
+    };
+
+    window.speechSynthesis.speak(speechUtterance);
+    isSpeaking = true;
+    speakBtn.textContent = "⏹ Stop";
+}
+
+function stopSpeechIfPlaying() {
+    if (isSpeaking) {
+        window.speechSynthesis.cancel();
+        isSpeaking = false;
+        const speakBtn = document.querySelector(".speak-btn");
+        if (speakBtn) {
+            speakBtn.textContent = "🔊 Listen";
+        }
+    }
+}
+
+function handleSendOrStop() {
+    if (isGenerating) {
+        stopGeneration();
+    } else {
+        sendMessage();
+    }
+}
+
+function stopGeneration() {
+    if (currentAbortController) {
+        currentAbortController.abort();
+    }
+}
+
+function startNewTrip() {
+    // Clears the current thread so the next message starts a brand new
+    // LangGraph thread instead of continuing the old one.
+    currentThreadId = null;
+    localStorage.removeItem("travel_thread_id");
+
+    stopSpeechIfPlaying();
+
+    document.getElementById("userInput").value = "";
+    document.getElementById("resultBox").innerHTML = "";
+    document.getElementById("resultSection").classList.add("hidden");
+    document.getElementById("threadInfo").textContent = "Thread ID: -";
+    latestAnswerMarkdown = "";
+
+    hideError();
+
+    document.getElementById("userInput").focus();
+}
 
 function setPrompt(text) {
     document.getElementById("userInput").value = text;
@@ -10,14 +100,18 @@ function setLoading(isLoading) {
     const btnText = document.getElementById("btnText");
     const btnLoader = document.getElementById("btnLoader");
 
-    sendBtn.disabled = isLoading;
+    isGenerating = isLoading;
+    // The button stays enabled while loading so it can double as a Stop button.
+    sendBtn.disabled = false;
 
     if (isLoading) {
-        btnText.classList.add("hidden");
+        btnText.textContent = "Stop";
         btnLoader.classList.remove("hidden");
+        sendBtn.classList.add("stop-mode");
     } else {
-        btnText.classList.remove("hidden");
+        btnText.textContent = "Generate Plan";
         btnLoader.classList.add("hidden");
+        sendBtn.classList.remove("stop-mode");
     }
 }
 
@@ -36,6 +130,8 @@ function hideError() {
 }
 
 function showResult(answer, threadId) {
+    stopSpeechIfPlaying();
+
     latestAnswerMarkdown = answer;
 
     const resultSection = document.getElementById("resultSection");
@@ -70,6 +166,7 @@ async function sendMessage() {
     }
 
     setLoading(true);
+    currentAbortController = new AbortController();
 
     try {
         // getAuthHeaders() comes from auth.js — returns {} for guests,
@@ -85,7 +182,8 @@ async function sendMessage() {
             body: JSON.stringify({
                 message: message,
                 thread_id: currentThreadId
-            })
+            }),
+            signal: currentAbortController.signal
         });
 
         const data = await response.json();
@@ -105,9 +203,14 @@ async function sendMessage() {
         }
 
     } catch (error) {
-        showError(error.message);
+        if (error.name === "AbortError") {
+            showError("Stopped. Note: since the AI agents run as one continuous step on the server, any already-started flight/hotel/AI calls may still finish in the background, but that result won't be shown here.");
+        } else {
+            showError(error.message);
+        }
     } finally {
         setLoading(false);
+        currentAbortController = null;
     }
 }
 

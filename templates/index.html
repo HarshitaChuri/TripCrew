@@ -72,9 +72,15 @@
                     </p>
                 </div>
 
-                <div class="status-pill">
-                    <span class="status-dot"></span>
-                    Online
+                <div class="header-actions">
+                    <button class="new-trip-btn" onclick="startNewTrip()" title="Start planning a different trip">
+                        + New Trip
+                    </button>
+
+                    <div class="status-pill">
+                        <span class="status-dot"></span>
+                        Online
+                    </div>
                 </div>
             </div>
 
@@ -96,7 +102,7 @@
                     </button>
                 </div>
 
-                <button id="sendBtn" onclick="sendMessage()">
+                <button id="sendBtn" onclick="handleSendOrStop()">
                     <span id="btnText">Generate Plan</span>
                     <span id="btnLoader" class="loader hidden"></span>
                 </button>
@@ -131,6 +137,10 @@
                 </div>
 
                 <div class="result-actions">
+                    <button class="speak-btn" onclick="toggleSpeech()">
+                        🔊 Listen
+                    </button>
+
                     <button class="copy-btn" onclick="copyResult()">
                         Copy
                     </button>

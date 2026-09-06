@@ -1,0 +1,18 @@
+# Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Secrets — never bake these into a Docker image
+.env
+
+# Git and caches
+.git
+__pycache__/
+*.pyc
+
+# Docs not needed inside the container
+README.md

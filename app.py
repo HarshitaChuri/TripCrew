@@ -83,6 +83,22 @@ async def list_trips(current_user: auth.UserOut = Depends(auth.get_current_user_
     return {"success": True, "trips": trips}
 
 
+@app.delete("/api/trips/{trip_id}")
+async def delete_trip(
+    trip_id: str,
+    current_user: auth.UserOut = Depends(auth.get_current_user_required)
+):
+    deleted = database.delete_trip(current_user.id, trip_id)
+
+    if not deleted:
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "error": "Trip not found."}
+        )
+
+    return {"success": True}
+
+
 # =========================
 # Travel planner (guest-friendly: works with or without a token)
 # =========================

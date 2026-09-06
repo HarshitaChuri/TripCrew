@@ -128,3 +128,15 @@ def get_user_trips(user_id: str):
             (user_id,)
         )
         return cur.fetchall()
+
+
+def delete_trip(user_id: str, trip_id: str) -> bool:
+    """Deletes a trip only if it belongs to the given user.
+    Returns True if a row was deleted, False if not found / not owned by this user."""
+    with _conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM trips WHERE id = %s AND user_id = %s RETURNING id;",
+            (trip_id, user_id)
+        )
+        deleted = cur.fetchone()
+        return deleted is not None

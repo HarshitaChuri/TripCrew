@@ -80,6 +80,7 @@ Copy `.env.example` to `.env` and fill in your values:
 ```
 DATABASE_URL=postgresql://user:password@localhost:5432/tripcrew_db
 GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL_NAME=openai/gpt-oss-120b
 AVIATIONSTACK_API_KEY=your_aviationstack_api_key
 TAVILY_API_KEY=your_tavily_api_key
 DEFAULT_ORIGIN_IATA=DAC
@@ -155,6 +156,14 @@ Voice Design Notes
 * The transcript is inserted into the same textarea used for typed input, so it
   flows through the exact same `/api/travel` request — no special-casing needed
   in the LangGraph workflow itself.
+
+A Note on Groq Model Names
+-----------------------------
+Groq periodically retires older models (e.g. `llama-3.3-70b-versatile` was
+decommissioned in August 2026). The LLM used for itinerary/response generation
+is controlled by `GROQ_MODEL_NAME` in `.env` rather than hardcoded, so if you
+ever see a `model_not_found` error, check the current model list at
+console.groq.com/docs/models and update `.env` — no code changes needed.
 
 Contributing
 ------------
