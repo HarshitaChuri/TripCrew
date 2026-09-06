@@ -1,6 +1,12 @@
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
+let recordingStartTime = null;
+
+// Recordings shorter than this are almost certainly a mis-click or the
+// mic-permission prompt eating the recording window, not real speech —
+// skip the API call entirely and ask the user to try again.
+const MIN_RECORDING_MS = 800;
 
 function isVoiceSupported() {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
@@ -44,11 +50,21 @@ async function startRecording() {
 
         mediaRecorder.onstop = async () => {
             stream.getTracks().forEach(track => track.stop());
+
+            const durationMs = Date.now() - recordingStartTime;
+
+            if (durationMs < MIN_RECORDING_MS) {
+                showError("That recording was too short to catch — click the mic and speak for at least a second.");
+                setMicUI(false, false);
+                return;
+            }
+
             const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
             await sendAudioForTranscription(audioBlob);
         };
 
         mediaRecorder.start();
+        recordingStartTime = Date.now();
         isRecording = true;
         setMicUI(true);
 

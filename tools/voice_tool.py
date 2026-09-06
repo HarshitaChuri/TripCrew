@@ -16,6 +16,28 @@ GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 TRANSCRIBE_MODEL = "whisper-large-v3-turbo"
 
 
+# Whisper models (including Groq's) are known to "hallucinate" these exact
+# generic phrases when given silent or near-silent audio — an artifact of
+# being trained partly on YouTube captions. If we get back one of these,
+# it almost certainly means no real speech was captured, not that the
+# user genuinely said this.
+SILENCE_HALLUCINATIONS = {
+    "thank you.",
+    "thank you",
+    "thanks for watching.",
+    "thanks for watching!",
+    "thank you for watching.",
+    "please subscribe.",
+    "subscribe.",
+    "bye.",
+    "bye-bye.",
+    "you",
+    "the",
+    "okay.",
+    "ok.",
+}
+
+
 def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
     """Sends recorded audio bytes to Groq Whisper and returns the transcript text."""
     if not GROQ_API_KEY:
@@ -53,7 +75,16 @@ def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
     result = response.json()
     text = result.get("text", "").strip()
 
-    if not text:
-        raise ValueError("Could not transcribe any speech from the recording.")
+    if not text or len(text) < 3:
+        raise ValueError(
+            "Could not detect clear speech in that recording. "
+            "Please try again, speaking clearly right after the mic starts listening."
+        )
+
+    if text.lower() in SILENCE_HALLUCINATIONS:
+        raise ValueError(
+            "Didn't catch that clearly (the recording may have been too short or silent). "
+            "Please try again, speaking right after clicking the mic."
+        )
 
     return text
