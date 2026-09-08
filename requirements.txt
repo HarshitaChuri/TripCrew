@@ -21,3 +21,9 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.9
 email-validator==2.1.1
+
+
+# --- Added for MCP / Supervisor / Guardrails / HITL ---
+langchain-mcp-adapters==0.3.0
+mcp==1.28.1
+nest_asyncio==1.6.0
