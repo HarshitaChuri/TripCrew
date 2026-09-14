@@ -50,7 +50,7 @@
 
         <section class="hero-section">
             <div class="badge">
-                🧳 TripCrew — A Multi-Agent Travel Planner with LangGraph
+                🧳Multi-Agent-System-using-LangGraph-MCP-Supervisor-Guardrails-HITL
             </div>
 
             <h1>
@@ -68,7 +68,7 @@
                 <div>
                     <h2>Where do you want to go?</h2>
                     <p>
-                        Example: Plan a complete 7 days Japan trip from Bangladesh under 2 lakhs. Or tap the mic and just say it.
+                        Example: Plan a complete 7 days Japan trip from Mumbai under 2 lakhs. Or tap the mic and just say it.
                     </p>
                 </div>
 
@@ -156,6 +156,31 @@
                 <div id="resultBox" class="result-box"></div>
             </div>
 
+        </section>
+
+        <section id="approvalPanel" class="approval-panel hidden">
+            <div class="approval-header">
+                <h3>👀 Review this draft</h3>
+                <span id="revisionBadge" class="revision-badge hidden"></span>
+            </div>
+
+            <p id="approvalAgentsInfo" class="approval-agents-info"></p>
+
+            <div class="approval-actions">
+                <button class="approve-btn" onclick="approvePlan()">
+                    ✅ Approve &amp; Finalize
+                </button>
+                <button class="reject-btn" onclick="toggleFeedbackBox()">
+                    ✏️ Request Changes
+                </button>
+            </div>
+
+            <div id="feedbackBox" class="feedback-box hidden">
+                <textarea id="feedbackInput" placeholder="What would you like changed? (e.g. 'make it cheaper', 'add more sightseeing on day 2')"></textarea>
+                <button class="submit-feedback-btn" onclick="submitRevision()">
+                    Submit Feedback
+                </button>
+            </div>
         </section>
 
         <section id="errorBox" class="error-box hidden"></section>

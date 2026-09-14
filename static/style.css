@@ -656,6 +656,134 @@ textarea::placeholder {
     padding: 28px;
 }
 
+/* =========================
+   Approval panel (HITL)
+========================= */
+
+.approval-panel {
+    margin-top: 20px;
+    padding: 24px 28px;
+    border-radius: 22px;
+    background: rgba(124, 58, 237, 0.1);
+    border: 1px solid rgba(168, 85, 247, 0.32);
+    backdrop-filter: blur(20px);
+}
+
+.approval-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.approval-header h3 {
+    font-size: 1.15rem;
+    color: #ede9fe;
+}
+
+.revision-badge {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fde68a;
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.approval-agents-info {
+    color: #a78bfa;
+    font-size: 0.85rem;
+    margin-bottom: 18px;
+}
+
+.approval-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.approve-btn,
+.reject-btn,
+.submit-feedback-btn {
+    border: none;
+    border-radius: 14px;
+    padding: 12px 22px;
+    font-weight: 800;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: 0.2s ease;
+}
+
+.approve-btn {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #ffffff;
+    box-shadow: 0 12px 28px rgba(34, 197, 94, 0.25);
+}
+
+.approve-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 16px 34px rgba(34, 197, 94, 0.35);
+}
+
+.reject-btn {
+    background: rgba(30, 41, 59, 0.85);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    color: #fde68a;
+}
+
+.reject-btn:hover {
+    background: rgba(251, 191, 36, 0.15);
+}
+
+.approve-btn:disabled,
+.reject-btn:disabled,
+.submit-feedback-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.feedback-box {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.feedback-box textarea {
+    min-height: 90px;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 16px;
+    background: rgba(2, 6, 23, 0.55);
+    color: #ffffff;
+    padding: 14px 16px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+    font-family: inherit;
+}
+
+.feedback-box textarea:focus {
+    border-color: rgba(168, 85, 247, 0.7);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+}
+
+.submit-feedback-btn {
+    align-self: flex-start;
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    color: #ffffff;
+    box-shadow: 0 12px 28px rgba(37, 99, 235, 0.28);
+}
+
+.submit-feedback-btn:hover {
+    transform: translateY(-1px);
+}
+
 .result-actions {
     display: flex;
     gap: 10px;
@@ -915,6 +1043,20 @@ footer {
     .download-btn,
     .speak-btn {
         flex: 1;
+    }
+
+    .approval-panel {
+        padding: 18px 20px;
+    }
+
+    .approval-actions {
+        flex-direction: column;
+    }
+
+    .approve-btn,
+    .reject-btn,
+    .submit-feedback-btn {
+        width: 100%;
     }
 
     .pdf-content {
