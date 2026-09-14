@@ -69,6 +69,27 @@ llm = ChatGroq(
     api_key=GROQ_API_KEY,
 )
 
+# Separate instance with an explicit, higher max_tokens for the two agents
+# that generate long, multi-section formatted content (itinerary_agent,
+# final_agent). Without an explicit max_tokens, ChatGroq falls back to
+# Groq's own default output cap, which isn't generous enough for a full
+# 7-section itinerary with several tables — the model just stops mid-way
+# (finish_reason: "length") with no error, producing a silently truncated
+# response. Other agents (guardrail/supervisor/budget/quick_answer) stay
+# on the smaller default `llm` since they don't need long output and this
+# conserves the shared 8,000 TPM free-tier budget.
+llm_long_form = ChatGroq(
+    model=GROQ_MODEL_NAME,
+    api_key=GROQ_API_KEY,
+    max_tokens=8000,
+    
+    # gpt-oss-120b is a "reasoning" model — it spends part of max_tokens on
+    # hidden internal reasoning before writing the visible answer. "low"
+    # keeps that internal overhead small, leaving more of the budget for
+    # the actual formatted itinerary text instead of invisible thinking.
+    reasoning_effort="medium",
+    )
+
 # Safety cap on the human-in-the-loop revision cycle. Without this, a user
 # rejecting a draft repeatedly could loop the graph forever, burning LLM
 # and MCP calls with no exit. After this many rejected rounds, the last
@@ -86,6 +107,7 @@ class TravelState(TypedDict, total=False):
     # Supervisor + guardrail state
     guardrail_allowed: bool
     guardrail_reason: str
+    request_type: str  # "quick_info" or "full_itinerary"
     selected_agents: list[str]
     trip_constraints: dict[str, Any]
     supervisor_reasoning: str
@@ -127,34 +149,52 @@ AGENT_ORDER = [
 ]
 
 
-def _invoke_with_retry(messages, max_retries: int = 3):
-       last_exc = None
-       for attempt in range(max_retries):
-           try:
-               return llm.invoke(messages)
-           except RateLimitError as exc:
-               last_exc = exc
-               wait_seconds = 15.0
-               match = re.search(r"try again in ([\d.]+)s", str(exc))
-               if match:
-                   wait_seconds = float(match.group(1)) + 1.0
-               print(
-                   f"Rate limited by Groq (attempt {attempt + 1}/{max_retries}). "
-                   f"Waiting {wait_seconds:.1f}s before retrying...",
-                   flush=True,
-               )
-               time.sleep(wait_seconds)
-       raise last_exc
+def _invoke_with_retry(messages, max_retries: int = 3, llm_client=None):
+    """
+    Wraps llm.invoke() with retry-on-rate-limit logic.
+
+    This pipeline makes several more LLM calls per request than the
+    original 4-agent version (guardrail + supervisor + up to 4 specialists
+    + itinerary + final = up to 7), so it's much more likely to hit Groq's
+    free-tier TPM (tokens-per-minute) limit mid-run. Without this, a single
+    429 would crash the whole graph run and lose the user's request.
+    Groq's error message includes a suggested wait time ("try again in
+    10.4s") — we parse that when available, otherwise fall back to a
+    fixed 15s wait.
+    """
+    client = llm_client or llm
+    last_exc = None
+
+    for attempt in range(max_retries):
+        try:
+            return client.invoke(messages)
+        except RateLimitError as exc:
+            last_exc = exc
+            wait_seconds = 15.0
+            match = re.search(r"try again in ([\d.]+)s", str(exc))
+            if match:
+                wait_seconds = float(match.group(1)) + 1.0
+
+            print(
+                f"Rate limited by Groq (attempt {attempt + 1}/{max_retries}). "
+                f"Waiting {wait_seconds:.1f}s before retrying...",
+                flush=True,
+            )
+            time.sleep(wait_seconds)
+
+    # All retries exhausted — raise the last real error rather than
+    # swallowing it, so it surfaces clearly in app.py's error handling.
+    raise last_exc
 
 
 def _llm_text(system_prompt: str, user_prompt: str) -> str:
-       response = _invoke_with_retry(
-           [
-               SystemMessage(content=system_prompt),
-               HumanMessage(content=user_prompt),
-           ]
-       )
-       return str(response.content)
+    response = _invoke_with_retry(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+    )
+    return str(response.content)
 
 
 def _json_from_llm(text: str) -> dict[str, Any]:
@@ -177,6 +217,22 @@ def _empty_constraints() -> dict[str, Any]:
         "travel_style": "",
         "special_preferences": [],
     }
+
+
+def _truncate(text: str, max_chars: int = 600) -> str:
+    """
+    Truncates prior-agent output before re-embedding it into a later
+    prompt. itinerary_agent and final_agent both concatenate flight +
+    hotel + weather + budget results, and final_agent adds the full draft
+    itinerary on top of that — without this, the same content compounds
+    across 3-4 prompts in the same request and can exceed Groq's free-tier
+    per-minute token budget in a single call (HTTP 413), which retrying
+    can't fix since the oversized request is the same size every time.
+    """
+    text = text or ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rsplit(" ", 1)[0] + "... [truncated for length]"
 
 
 # =========================
@@ -248,10 +304,22 @@ Available agents:
 - hotel_agent: hotels, accommodation, neighborhoods, or places to stay
 - weather_agent: weather, climate, season, forecast, or packing advice
 - budget_agent: cost, affordability, price limits, or budget feasibility
-- itinerary_agent: creates the integrated travel plan and must always be included
+- itinerary_agent: creates a full multi-day integrated travel plan — only needed
+  for actual trip-planning requests, never for a single standalone question
+
+First classify the request type:
+- "quick_info": the user is asking a specific standalone question (e.g. "what's
+  the weather in Tokyo", "flights from Mumbai to Dubai", "is Bali affordable on
+  a $500 budget") and does NOT want a multi-day itinerary or a review step.
+  Select only the specialist agent(s) actually needed to answer it, and do
+  NOT include itinerary_agent.
+- "full_itinerary": the user wants an actual trip plan (e.g. "plan a 4 day trip
+  to Dubai", "create an itinerary for Japan"). Always include itinerary_agent
+  for this type, plus whichever specialists are relevant.
 
 Return strict JSON only using this schema:
 {{
+  "request_type": "quick_info",
   "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
   "trip_constraints": {{
     "destination": "",
@@ -274,15 +342,29 @@ User request:
             supervisor_prompt,
         )
         parsed = _json_from_llm(supervisor_raw)
+
+        request_type = str(parsed.get("request_type", "full_itinerary")).strip()
+        if request_type not in ("quick_info", "full_itinerary"):
+            request_type = "full_itinerary"
+
         requested_agents = parsed.get("selected_agents", [])
         selected_agents = [
             name for name in AGENT_ORDER
             if name in requested_agents and name in KNOWN_AGENTS
         ]
 
-        # The itinerary agent integrates whichever specialist results were selected.
-        if "itinerary_agent" not in selected_agents:
+        # Only full trip-planning requests get the itinerary + HITL approval
+        # flow forced on. A quick factual question shouldn't be turned into
+        # a draft itinerary the user has to review and approve.
+        if request_type == "full_itinerary" and "itinerary_agent" not in selected_agents:
             selected_agents.append("itinerary_agent")
+        elif request_type == "quick_info":
+            selected_agents = [a for a in selected_agents if a != "itinerary_agent"]
+            if not selected_agents:
+                # Guardrail already confirmed this is a valid travel question —
+                # fall back to hotel_agent (general web search) so there's at
+                # least something to answer with.
+                selected_agents = ["hotel_agent"]
 
         constraints = _empty_constraints()
         parsed_constraints = parsed.get("trip_constraints", {})
@@ -294,6 +376,7 @@ User request:
     except Exception as exc:
         print(f"Supervisor fallback used: {exc}")
         # Original workflow behavior is preserved as the fallback.
+        request_type = "full_itinerary"
         selected_agents = AGENT_ORDER.copy()
         constraints = _empty_constraints()
         reasoning = (
@@ -304,6 +387,7 @@ User request:
     return {
         "guardrail_allowed": True,
         "guardrail_reason": guardrail_reason,
+        "request_type": request_type,
         "selected_agents": selected_agents,
         "trip_constraints": constraints,
         "supervisor_reasoning": reasoning,
@@ -362,11 +446,15 @@ def flight_agent(state: TravelState):
 
         prompt = FLIGHT_AGENT_PROMPT.format(
             query=query,
-            airport_data=str(airports)[:3000],
-            airline_data=str(airlines)[:3000],
+            # Reduced from 3000 to 1500 chars each — this pipeline makes
+            # far more LLM calls per request than before, so trimming the
+            # biggest single payload helps stay under Groq's free-tier
+            # TPM limit.
+            airport_data=str(airports)[:1500],
+            airline_data=str(airlines)[:1500],
         )
 
-        response = llm.invoke(
+        response = _invoke_with_retry(
             [
                 SystemMessage(content="You are an expert travel flight planner."),
                 HumanMessage(content=prompt),
@@ -439,6 +527,8 @@ Forecast:
         "weather_results": weather_results,
         "messages": [AIMessage(content="Weather information processed.")],
     }
+
+
 # =========================
 # Budget Agent - new specialist
 # =========================
@@ -453,13 +543,13 @@ Trip Constraints:
 {state.get('trip_constraints', {})}
 
 Flight Results:
-{state.get('flight_results', '')}
+{_truncate(state.get('flight_results', ''))}
 
 Hotel Results:
-{state.get('hotel_results', '')}
+{_truncate(state.get('hotel_results', ''))}
 
 Weather Results:
-{state.get('weather_results', '')}
+{_truncate(state.get('weather_results', ''))}
 
 Return:
 1. Estimated cost categories
@@ -470,7 +560,7 @@ Return:
 If exact live prices are unavailable, clearly label estimates as approximate.
 """
 
-    response = llm.invoke(
+    response = _invoke_with_retry(
         [
             SystemMessage(content="You are a practical travel budget analyst."),
             HumanMessage(content=prompt),
@@ -480,6 +570,53 @@ If exact live prices are unavailable, clearly label estimates as approximate.
     return {
         "budget_results": response.content,
         "messages": [AIMessage(content="Budget assessment generated.")],
+        "llm_calls": state.get("llm_calls", 0) + 1,
+    }
+
+
+# =========================
+# Quick Answer Agent - for standalone questions (e.g. "what's the weather
+# in Tokyo") that don't need a multi-day itinerary or human approval.
+# Goes straight to END, skipping itinerary_agent and human_approval.
+# =========================
+def quick_answer_agent(state: TravelState):
+    prompt = f"""
+Answer the user's specific travel-related question directly and concisely,
+using the information gathered below. Do NOT create a multi-day itinerary
+or trip plan, and do not use headers like "Trip Summary" or "Day-by-Day
+Itinerary" — just answer what was actually asked, in a few short paragraphs.
+
+User Question:
+{state['user_query']}
+
+Available Information:
+
+Flight Results:
+{_truncate(state.get('flight_results', ''), max_chars=800)}
+
+Hotel/Search Results:
+{_truncate(state.get('hotel_results', ''), max_chars=800)}
+
+Weather Results:
+{_truncate(state.get('weather_results', ''), max_chars=1200)}
+
+Budget Results:
+{_truncate(state.get('budget_results', ''), max_chars=800)}
+
+If a piece of information above is empty, simply don't mention it — don't
+say it's missing.
+"""
+
+    response = _invoke_with_retry(
+        [
+            SystemMessage(content="You are a helpful, concise travel information assistant."),
+            HumanMessage(content=prompt),
+        ]
+    )
+
+    return {
+        "final_response": response.content,
+        "messages": [response],
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
@@ -499,7 +636,7 @@ The human reviewer requested these changes to the previous draft — apply them:
 {human_feedback}
 
 Previous Draft:
-{state.get('itinerary', '')}
+{_truncate(state.get('itinerary', ''), max_chars=1200)}
 """
 
     prompt = f"""
@@ -512,26 +649,29 @@ Trip Constraints:
 {state.get('trip_constraints', {})}
 
 Flight Results:
-{state.get('flight_results', '')}
+{_truncate(state.get('flight_results', ''))}
 
 Hotel Results:
-{state.get('hotel_results', '')}
+{_truncate(state.get('hotel_results', ''))}
 
 Weather Results:
-{state.get('weather_results', '')}
+{_truncate(state.get('weather_results', ''))}
 
 Budget Results:
-{state.get('budget_results', '')}
+{_truncate(state.get('budget_results', ''))}
 {revision_section}
-Make the itinerary practical, budget-aware, and easy to follow.
+Make the itinerary practical, budget-aware, and easy to follow. Keep each
+day to 3-5 bullet points rather than an hour-by-hour schedule, and keep
+tables compact.
 Create a clear draft that is ready for human review.
 """
 
-    response = llm.invoke(
+    response = _invoke_with_retry(
         [
             SystemMessage(content="You are an expert travel planner."),
             HumanMessage(content=prompt),
-        ]
+        ],
+        llm_client=llm_long_form,
     )
 
     approval_request = (
@@ -618,30 +758,43 @@ Supervisor Constraints:
 {state.get('trip_constraints', {})}
 
 Flights:
-{state.get('flight_results', '')}
+{_truncate(state.get('flight_results', ''), max_chars=400)}
 
 Hotels:
-{state.get('hotel_results', '')}
+{_truncate(state.get('hotel_results', ''), max_chars=400)}
 
 Weather:
-{state.get('weather_results', '')}
+{_truncate(state.get('weather_results', ''), max_chars=400)}
 
 Budget Analysis:
-{state.get('budget_results', '')}
+{_truncate(state.get('budget_results', ''), max_chars=400)}
 
 Draft Itinerary:
-{state.get('itinerary', '')}
+{_truncate(state.get('itinerary', ''), max_chars=2500)}
 
-Format the final answer beautifully using these sections:
-1. Trip Summary
-2. Flight Information
-3. Hotel Suggestions
-4. Weather Information
-5. Day-by-Day Itinerary
-6. Estimated Budget
-7. Final Recommendations
+Format the final answer using these exact section headers, word-for-word,
+each as its own markdown heading, in this exact order, and no others:
+
+## 1. Trip Summary
+## 2. Flight Information
+## 3. Hotel Suggestions
+## 4. Weather Information
+## 5. Day-by-Day Itinerary
+## 6. Estimated Budget
+## 7. Final Recommendations
+
+Do not rename these headers, do not merge them, and do not add any section
+that isn't one of these 7 — for example, do not add a "Quick-Look Summary",
+"Practical Tips", "Quick Reference", "Ready to Book", or "Packing
+Checklist" section. If you have tips or practical advice, put them inside
+"Final Recommendations" as bullet points, not as a separate heading.
 
 Important:
+- Use the 7 headers above verbatim, including the numbers.
+- Be concise. For "Day-by-Day Itinerary", give 3-5 bullet points per day
+  (not an hour-by-hour table with dual time zones) — a traveler wants the
+  shape of the day, not a minute-by-minute schedule.
+- Keep tables small — a handful of rows, not exhaustive listings.
 - Be clear and practical.
 - Mention that live flight APIs may not provide ticket prices when pricing is unavailable.
 - Include weather-based travel advice.
@@ -649,13 +802,14 @@ Important:
 - Incorporate the human feedback when revision was requested.
 """
 
-    response = llm.invoke(
+    response = _invoke_with_retry(
         [
             SystemMessage(
                 content="You are a professional AI travel booking assistant."
             ),
             HumanMessage(content=final_prompt),
-        ]
+        ],
+        llm_client=llm_long_form,
     )
 
     return {
@@ -674,6 +828,7 @@ ROUTE_MAP = {
     "hotel_agent": "hotel_agent",
     "weather_agent": "weather_agent",
     "budget_agent": "budget_agent",
+    "quick_answer_agent": "quick_answer_agent",
     "itinerary_agent": "itinerary_agent",
 }
 
@@ -683,12 +838,20 @@ def _selected_agents(state: TravelState) -> list[str]:
     return [agent for agent in AGENT_ORDER if agent in selected]
 
 
+def _terminal_node(state: TravelState) -> str:
+    """Where to go once all selected specialist agents have run.
+    quick_info requests skip the itinerary + human-approval flow entirely."""
+    if state.get("request_type") == "quick_info":
+        return "quick_answer_agent"
+    return "itinerary_agent"
+
+
 def route_from_supervisor(state: TravelState) -> str:
     if not state.get("guardrail_allowed", True):
         return "guardrail_blocked"
 
     selected = _selected_agents(state)
-    return selected[0] if selected else "itinerary_agent"
+    return selected[0] if selected else _terminal_node(state)
 
 
 def route_after_agent(current_agent: str):
@@ -700,7 +863,7 @@ def route_after_agent(current_agent: str):
             if next_agent in selected:
                 return next_agent
 
-        return "itinerary_agent"
+        return _terminal_node(state)
 
     return route
 
@@ -733,6 +896,7 @@ graph.add_node("flight_agent", flight_agent)
 graph.add_node("hotel_agent", hotel_agent)
 graph.add_node("weather_agent", weather_agent)
 graph.add_node("budget_agent", budget_agent)
+graph.add_node("quick_answer_agent", quick_answer_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("human_approval", human_approval_agent)
 graph.add_node("final_agent", final_agent)
@@ -761,6 +925,7 @@ graph.add_conditional_edges(
 )
 graph.add_edge("final_agent", END)
 graph.add_edge("guardrail_blocked", END)
+graph.add_edge("quick_answer_agent", END)
 
 # =========================
 # PostgreSQL Checkpointer - original persistence kept
@@ -806,6 +971,7 @@ def _serialize_result(
 
     return {
         "thread_id": thread_id,
+        "user_query": result.get("user_query", ""),
         "answer": answer,
         "requires_approval": interrupt_payload is not None,
         "approval_request": (
@@ -827,6 +993,7 @@ def _serialize_result(
         "supervisor_reasoning": result.get("supervisor_reasoning", ""),
         "guardrail_allowed": result.get("guardrail_allowed", True),
         "guardrail_reason": result.get("guardrail_reason", ""),
+        "request_type": result.get("request_type", "full_itinerary"),
         "approved": result.get("approved"),
         "human_feedback": result.get("human_feedback", ""),
         "revision_count": result.get("revision_count", 0),
@@ -848,6 +1015,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
             "user_query": user_input,
             "guardrail_allowed": True,
             "guardrail_reason": "",
+            "request_type": "full_itinerary",
             "selected_agents": [],
             "trip_constraints": _empty_constraints(),
             "supervisor_reasoning": "",
