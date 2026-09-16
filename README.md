@@ -1,6 +1,3 @@
-
-
-```markdown
 🧳 TripCrew — A Multi-Agent Travel Planner with LangGraph, MCP, Supervisor, Guardrails & HITL
 ================================================================================================
 
@@ -287,5 +284,3 @@ Acknowledgments
 This project is built with the help of modern LLM tooling and travel APIs, and it is
 intended as a practical example of combining LangGraph agents, MCP tools, and
 human-in-the-loop review patterns in a real-world application.
-```
-
